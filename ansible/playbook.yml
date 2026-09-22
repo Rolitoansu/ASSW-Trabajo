@@ -1,0 +1,213 @@
+---
+- name: Esperar a que la infraestructura responda
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Esperar disponibilidad SSH
+      wait_for_connection:
+        delay: 5
+        timeout: 300
+        sleep: 5
+
+- name: Configurar WAF Perimetral
+  hosts: waf
+  become: yes
+  tasks:
+    - name: Instalar Nginx, ModSecurity y Fail2Ban
+      apt:
+        name:
+          - nginx
+          - libnginx-mod-http-modsecurity
+          - fail2ban
+        state: present
+        update_cache: yes
+
+    - name: Habilitar y arrancar Fail2Ban
+      systemd:
+        name: fail2ban
+        enabled: yes
+        state: started
+
+- name: Configurar Servidores Internos
+  hosts: frontend, proxy_interno, backend
+  become: yes
+  tasks:
+    - name: Actualizar repositorios en la red privada
+      apt:
+        update_cache: yes
+
+- name: Desplegar backend
+  hosts: backend
+  become: yes
+  vars:
+    repo_url: "https://github.com/TU_ORG/assw_backend.git"
+    app_dir: /opt/assw_backend
+    frontend_ip: "{{ hostvars[groups['frontend'][0]]['inventory_hostname'] }}"
+  tasks:
+    - name: Instalar dependencias de compilacion
+      apt:
+        name:
+          - git
+          - curl
+          - build-essential
+          - pkg-config
+          - libssl-dev
+        state: present
+
+    - name: Comprobar si rustup esta instalado
+      stat:
+        path: /root/.cargo/bin/rustc
+      register: rustc_stat
+
+    - name: Instalar Rust via rustup
+      shell: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+      args:
+        executable: /bin/bash
+      environment:
+        HOME: /root
+      when: not rustc_stat.stat.exists
+
+    - name: Clonar repositorio
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+
+    - name: Compilar binario
+      shell: |
+        source /root/.cargo/env
+        cargo build --release
+      args:
+        chdir: "{{ app_dir }}"
+        executable: /bin/bash
+      environment:
+        HOME: /root
+
+    - name: Instalar binario
+      copy:
+        src: "{{ app_dir }}/target/release/assw_backend"
+        dest: /usr/local/bin/assw_backend
+        remote_src: yes
+        mode: "0755"
+
+    - name: Crear servicio systemd
+      copy:
+        dest: /etc/systemd/system/assw_backend.service
+        content: |
+          [Unit]
+          Description=ASSW Backend
+          After=network.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/assw_backend
+          Restart=on-failure
+          RestartSec=5
+          Environment=PORT={{ backend_port }}
+          Environment=FRONTEND_ORIGIN=http://{{ frontend_ip }}
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Arrancar servicio
+      systemd:
+        name: assw_backend
+        daemon_reload: yes
+        enabled: yes
+        state: restarted
+
+- name: Desplegar frontend
+  hosts: frontend
+  become: yes
+  vars:
+    repo_url: "https://github.com/manugbd/ASSW_FRONT.git"
+    app_dir: /opt/assw_front
+    web_root: /var/www/assw_front
+    backend_ip: "{{ hostvars[groups['backend'][0]]['inventory_hostname'] }}"
+  tasks:
+    - name: Instalar git y curl
+      apt:
+        name: [git, curl]
+        state: present
+
+    - name: Anadir repositorio NodeSource
+      shell: curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+      args:
+        creates: /etc/apt/sources.list.d/nodesource.list
+
+    - name: Instalar Node.js
+      apt:
+        name: nodejs
+        state: present
+        update_cache: yes
+
+    - name: Instalar nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Crear directorio web
+      file:
+        path: "{{ web_root }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: "0755"
+
+    - name: Clonar repositorio
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+
+    - name: Instalar dependencias npm
+      command: npm install
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Compilar sitio estatico
+      command: npm run build
+      args:
+        chdir: "{{ app_dir }}"
+      environment:
+        PUBLIC_BACKEND_URL: "http://{{ backend_ip }}:{{ backend_port }}"
+
+    - name: Copiar build al directorio web
+      synchronize:
+        src: "{{ app_dir }}/dist/"
+        dest: "{{ web_root }}/"
+        delete: yes
+
+    - name: Configurar nginx
+      copy:
+        dest: /etc/nginx/sites-available/assw_front
+        content: |
+          server {
+              listen 80 default_server;
+              server_name _;
+              root {{ web_root }};
+              index index.html;
+              location / {
+                  try_files $uri $uri/ /index.html;
+              }
+          }
+
+    - name: Activar sitio
+      file:
+        src: /etc/nginx/sites-available/assw_front
+        dest: /etc/nginx/sites-enabled/assw_front
+        state: link
+
+    - name: Quitar sitio por defecto
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      ignore_errors: yes
+
+    - name: Recargar nginx
+      systemd:
+        name: nginx
+        state: reloaded
+        enabled: yes

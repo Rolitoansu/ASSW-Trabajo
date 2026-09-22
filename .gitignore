@@ -1,0 +1,81 @@
+# =================
+# TERRAFORM
+# =================
+
+# Directorio local de datos y plugins (descarga de providers y módulos)
+.terraform/
+
+# Ficheros de estado y sus copias de seguridad
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Ficheros de bloqueo de versiones (opcional: a veces se versiona, pero suele ignorarse en pruebas locales)
+.terraform.tfstate.lock.info
+# Nota: .terraform.lock.hcl suele RECOMENDARSE subirlo a git en equipos para fijar versiones, bórralo de aquí si prefieres ignorarlo.
+
+# Variables con datos sensibles o contraseñas
+*.tfvars
+*.tfvars.json
+
+# Ficheros de plan generados localmente
+*.tfplan
+*tfplan*
+
+# Registros de fallos (crash logs)
+crash.log
+crash.*.log
+
+# Ficheros de sobreescritura local
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Configuración CLI local
+.terraformrc
+terraform.rc
+
+
+# =================
+# ANSIBLE
+# =================
+
+# Inventarios locales o dinámicos que contengan credenciales o IPs privadas
+# (Si usas inventarios estáticos públicos, coméntalos)
+inventory/*.retry
+inventory.ini
+*.retry
+
+# Artefactos y roles descargados externamente (Ansible Galaxy)
+roles/
+collections/
+
+# Vaults cifrados con contraseñas en texto plano (¡Nunca subas tus passwords!)
+.vault_pass
+.ansible_vault_pass
+
+# Directorios temporales de ejecución o logs
+.ansible/
+tmp/
+*.log
+
+
+# =================
+# GENERAL / IDE / OS
+# =================
+
+# Entornos virtuales de Python (si ejecutas Ansible dentro de un venv)
+venv/
+ENV/
+.env
+
+# Directorios de editores e IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
