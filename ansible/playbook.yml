@@ -40,7 +40,7 @@
   hosts: backend
   become: yes
   vars:
-    repo_url: "https://github.com/TU_ORG/assw_backend.git"
+    repo_url: "https://github.com/manugbd/ASSW_BACK.git"
     app_dir: /opt/assw_backend
     frontend_ip: "{{ hostvars[groups['frontend'][0]]['inventory_hostname'] }}"
   tasks:
