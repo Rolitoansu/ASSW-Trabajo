@@ -67,7 +67,7 @@
         HOME: /root
       when: not rustc_stat.stat.exists
 
-        - name: Eliminar directorio si existe
+    - name: Eliminar directorio si existe
       file:
         path: "{{ app_dir }}"
         state: absent
@@ -164,7 +164,7 @@
       file:
         path: "{{ app_dir }}"
         state: absent
-        
+
     - name: Clonar repositorio
       git:
         repo: "{{ repo_url }}"
