@@ -9,6 +9,58 @@
         timeout: 300
         sleep: 5
 
+- name: Actualizar y configurar seguridad básica en todas las máquinas
+  hosts: all
+  become: yes
+  tasks:
+
+    - name: Actualizar repositorios
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Actualizar paquetes instalados
+      ansible.builtin.apt:
+        upgrade: safe
+
+    - name: Instalar UFW
+      ansible.builtin.apt:
+        name: ufw
+        state: present
+
+    - name: Establecer política de entrada por defecto
+      community.general.ufw:
+        direction: incoming
+        policy: deny
+
+    - name: Establecer política de salida por defecto
+      community.general.ufw:
+        direction: outgoing
+        policy: allow
+
+    - name: Permitir SSH
+      community.general.ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Permitir HTTP
+      community.general.ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+
+    - name: Permitir HTTPS
+      community.general.ufw:
+        rule: allow
+        port: "443"
+        proto: tcp
+
+    - name: Activar UFW
+      community.general.ufw:
+        state: enabled
+        logging: "on"
+
 - name: Configurar WAF Perimetral
   hosts: waf
   become: yes
