@@ -59,7 +59,7 @@ echo ">> Levantando la infraestructura con Terraform..."
 cd terraform
 export TF_VAR_ssh_public_key_path="${SSH_KEY}.pub"
 terraform init
-terraform apply -auto-approve -parallelism=2
+terraform apply -auto-approve
 cd ..
 
 echo ">> Configurando infraestructura con Ansible..."
