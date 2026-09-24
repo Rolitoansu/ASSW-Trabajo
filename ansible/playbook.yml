@@ -64,6 +64,10 @@
 - name: Configurar WAF Perimetral
   hosts: waf
   become: yes
+  vars:
+    frontend_ip: "{{ hostvars[groups['frontend'][0]]['inventory_hostname'] }}"
+    backend_ip: "{{ hostvars[groups['backend'][0]]['inventory_hostname'] }}"
+    backend_port: 8080
   tasks:
     - name: Instalar Nginx, ModSecurity y Fail2Ban
       apt:
@@ -80,6 +84,87 @@
         enabled: yes
         state: started
 
+    - name: Asegurar que existe el directorio /etc/modsecurity
+      file:
+        path: /etc/modsecurity
+        state: directory
+        mode: '0755'
+
+    - name: Descargar configuracion base de ModSecurity
+      get_url:
+        url: https://raw.githubusercontent.com/owasp-modsecurity/ModSecurity/v3/master/modsecurity.conf-recommended
+        dest: /etc/modsecurity/modsecurity.conf
+        mode: '0644'
+        force: no
+
+    - name: Activar motor de bloqueo de ModSecurity
+      lineinfile:
+        path: /etc/modsecurity/modsecurity.conf
+        regexp: '^SecRuleEngine'
+        line: 'SecRuleEngine On'
+
+    - name: Descargar unicode.mapping
+      get_url:
+        url: https://raw.githubusercontent.com/owasp-modsecurity/ModSecurity/v3/master/unicode.mapping
+        dest: /etc/modsecurity/unicode.mapping
+        mode: '0644'
+
+    - name: Crear directorio de reglas de ModSecurity para Nginx
+      file:
+        path: /etc/nginx/modsec
+        state: directory
+
+    - name: Crear archivo main.conf de ModSecurity
+      copy:
+        dest: /etc/nginx/modsec/main.conf
+        content: |
+          Include /etc/modsecurity/modsecurity.conf
+
+    - name: Configurar proxy inverso en el WAF (Frontend + API)
+      copy:
+        dest: /etc/nginx/sites-available/waf_proxy
+        content: |
+          server {
+              listen 80 default_server;
+              server_name _;
+
+              modsecurity on;
+              modsecurity_rules_file /etc/nginx/modsec/main.conf;
+
+              location / {
+                  proxy_pass http://{{ frontend_ip }}:80;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+
+              location /api/ {
+                  proxy_pass http://{{ backend_ip }}:{{ backend_port }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+
+    - name: Quitar sitio por defecto
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Activar proxy inverso
+      file:
+        src: /etc/nginx/sites-available/waf_proxy
+        dest: /etc/nginx/sites-enabled/waf_proxy
+        state: link
+
+    - name: Recargar Nginx
+      systemd:
+        name: nginx
+        state: reloaded
+
+
 - name: Configurar Servidores Internos
   hosts: frontend, proxy_interno, backend
   become: yes
@@ -95,7 +180,14 @@
     repo_url: "https://github.com/manugbd/ASSW_BACK.git"
     app_dir: /opt/assw_backend
     frontend_ip: "{{ hostvars[groups['frontend'][0]]['inventory_hostname'] }}"
+    backend_port: 8080
   tasks:
+    - name: Permitir trafico al backend en el puerto 8080
+      community.general.ufw:
+        rule: allow
+        port: "{{ backend_port }}"
+        proto: tcp
+
     - name: Instalar dependencias de compilacion
       apt:
         name:
@@ -162,7 +254,7 @@
           Restart=on-failure
           RestartSec=5
           Environment=PORT={{ backend_port }}
-          Environment=FRONTEND_ORIGIN=http://{{ frontend_ip }}
+          Environment=FRONTEND_ORIGIN=*
 
           [Install]
           WantedBy=multi-user.target
@@ -234,13 +326,13 @@
       args:
         chdir: "{{ app_dir }}"
       environment:
-        PUBLIC_BACKEND_URL: "http://{{ backend_ip }}:{{ backend_port }}"
+        PUBLIC_BACKEND_URL: "/"
 
     - name: Copiar build al directorio web
-      synchronize:
+      ansible.builtin.copy:
         src: "{{ app_dir }}/dist/"
         dest: "{{ web_root }}/"
-        delete: yes
+        remote_src: yes
 
     - name: Configurar nginx
       copy:
